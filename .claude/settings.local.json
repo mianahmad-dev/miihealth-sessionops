@@ -30,7 +30,12 @@
       "Read(//opt/homebrew/Cellar/node/24.3.0/libexec/lib/node_modules/npm/bin/**)",
       "Read(//opt/homebrew/Cellar/node/24.3.0/bin/**)",
       "Bash(chmod +x /Users/wahaj/Projects/TestProjects/voice-assistant/.claude/start-dev.sh)",
-      "Bash(node -e \"const next = require\\(''./node_modules/next/package.json''\\); console.log\\(next.version\\)\")"
+      "Bash(node -e \"const next = require\\(''./node_modules/next/package.json''\\); console.log\\(next.version\\)\")",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(/usr/local/bin/node node_modules/.bin/tsc --noEmit)",
+      "Bash(ls ~/.nvm/versions/node/*/bin/node)",
+      "Bash(/opt/homebrew/bin/node node_modules/.bin/tsc --noEmit)",
+      "Bash(/opt/homebrew/bin/node -e \":*)"
     ]
   }
 }
