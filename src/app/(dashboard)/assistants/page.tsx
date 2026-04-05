@@ -1,21 +1,41 @@
+import Link from "next/link";
+import { db } from "@/lib/db";
+import { assistants } from "@/lib/db/schema";
+import { desc } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth/helpers";
-import { LogoutButton } from "@/components/logout-button";
+import { Button } from "@/components/ui/button";
+import { AssistantTable } from "@/components/assistants/assistant-table";
 
 export default async function AssistantsPage() {
   const user = await requireAuth();
+  const rows = await db.select().from(assistants).orderBy(desc(assistants.updatedAt));
 
   return (
-    <main className="p-8">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold">Assistants</h1>
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-muted-foreground">
-            {user.name} ({user.role})
-          </span>
-          <LogoutButton />
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Assistants</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {rows.length} assistant{rows.length !== 1 ? "s" : ""}
+          </p>
         </div>
+        {user.role === "admin" && (
+          <Button render={<Link href="/assistants/new" />}>New assistant</Button>
+        )}
       </div>
-      <p className="text-muted-foreground">Phase 2 will build this out.</p>
-    </main>
+
+      <AssistantTable
+        assistants={rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          status: r.status,
+          language: r.language,
+          voice: r.voice,
+          version: r.version,
+          updatedAt: r.updatedAt,
+        }))}
+        isAdmin={user.role === "admin"}
+      />
+    </div>
   );
 }

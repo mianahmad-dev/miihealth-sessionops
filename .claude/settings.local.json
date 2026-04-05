@@ -21,7 +21,16 @@
       "mcp__Claude_Preview__preview_start",
       "Bash(pkill -f \"next dev\")",
       "Bash(npm rebuild:*)",
-      "Bash(/opt/homebrew/bin/node --version)"
+      "Bash(/opt/homebrew/bin/node --version)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(export PATH=\"/usr/local/bin:/opt/homebrew/bin:$PATH\")",
+      "Bash(export PATH=\"/opt/homebrew/bin:$PATH\")",
+      "Bash(npm run:*)",
+      "Bash(export PATH=\"/opt/homebrew/bin:/Users/wahaj/.nvm/versions/node/v20.12.0/bin:$PATH\")",
+      "Read(//opt/homebrew/Cellar/node/24.3.0/libexec/lib/node_modules/npm/bin/**)",
+      "Read(//opt/homebrew/Cellar/node/24.3.0/bin/**)",
+      "Bash(chmod +x /Users/wahaj/Projects/TestProjects/voice-assistant/.claude/start-dev.sh)",
+      "Bash(node -e \"const next = require\\(''./node_modules/next/package.json''\\); console.log\\(next.version\\)\")"
     ]
   }
 }
