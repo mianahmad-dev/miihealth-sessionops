@@ -1,0 +1,8 @@
+# .claudeignore
+node_modules/
+.next/
+drizzle/
+src/components/ui/
+*.lock
+dist/
+.git/
