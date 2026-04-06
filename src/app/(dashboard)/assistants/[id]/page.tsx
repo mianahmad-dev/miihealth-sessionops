@@ -44,12 +44,22 @@ export default async function EditAssistantPage({ params }: Props) {
         </div>
       </div>
 
-      {isAdmin && (
-        <AssistantActions
-          id={assistant.id}
-          status={assistant.status}
-        />
-      )}
+      <div className="flex items-center gap-3 flex-wrap">
+        {isAdmin && (
+          <AssistantActions
+            id={assistant.id}
+            status={assistant.status}
+          />
+        )}
+        {assistant.status === "published" && (
+          <Link
+            href={`/sessions/live/${assistant.id}`}
+            className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80"
+          >
+            Launch Session
+          </Link>
+        )}
+      </div>
 
       {isAdmin ? (
         <AssistantForm initialData={assistant} />

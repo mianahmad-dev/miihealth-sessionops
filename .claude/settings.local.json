@@ -35,7 +35,23 @@
       "Bash(/usr/local/bin/node node_modules/.bin/tsc --noEmit)",
       "Bash(ls ~/.nvm/versions/node/*/bin/node)",
       "Bash(/opt/homebrew/bin/node node_modules/.bin/tsc --noEmit)",
-      "Bash(/opt/homebrew/bin/node -e \":*)"
+      "Bash(/opt/homebrew/bin/node -e \":*)",
+      "Bash(ls -la /Users/wahaj/Projects/TestProjects/voice-assistant/src/app/\\\\\\(dashboard\\\\\\)/)",
+      "Bash(ps -p 18574 -o command=)",
+      "Bash(ps -p 35634 -o command=)",
+      "Bash(kill 35634)",
+      "Bash(/opt/homebrew/bin/node /opt/homebrew/bin/npm rebuild better-sqlite3)",
+      "Bash(export PATH=\"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin\")",
+      "Bash(node npm:*)",
+      "Bash(PATH=\"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin\" /opt/homebrew/bin/node /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js rebuild better-sqlite3)",
+      "Bash(~/.nvm/versions/node/v20.12.0/bin/node --version)",
+      "Bash(PATH=\"$HOME/.nvm/versions/node/v20.12.0/bin:$PATH\" ~/.nvm/versions/node/v20.12.0/bin/npm rebuild better-sqlite3)",
+      "Bash(find \"/Users/wahaj/Projects/TestProjects/voice-assistant/src/app/\\(dashboard\\)/sessions\" -type f)",
+      "Bash(mkdir -p /Users/wahaj/Projects/TestProjects/voice-assistant/src/app/\\\\\\(dashboard\\\\\\)/sessions/[id])",
+      "Bash(mkdir -p /Users/wahaj/Projects/TestProjects/voice-assistant/src/app/\\\\\\(dashboard\\\\\\)/assistants/[id]/sessions)",
+      "Bash(/Users/wahaj/.nvm/versions/node/v22.14.0/bin/npx tsc:*)",
+      "Bash(PATH=\"/usr/local/bin:/usr/bin:/bin\" node_modules/.bin/tsc --noEmit)",
+      "Bash(~/.nvm/versions/node/v20.11.0/bin/node node_modules/.bin/tsc --noEmit)"
     ]
   }
 }

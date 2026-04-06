@@ -1,7 +1,11 @@
 import type { VoiceProvider } from "./types";
 import { MockVoiceProvider } from "./mock-provider";
 
+let _provider: VoiceProvider | null = null;
+
 export function getVoiceProvider(): VoiceProvider {
+  if (_provider) return _provider;
+
   const provider = process.env.VOICE_PROVIDER ?? "mock";
 
   if (provider === "pipeline") {
@@ -10,10 +14,12 @@ export function getVoiceProvider(): VoiceProvider {
     const { PipelineVoiceProvider } = require("./pipeline-provider") as {
       PipelineVoiceProvider: new () => VoiceProvider;
     };
-    return new PipelineVoiceProvider();
+    _provider = new PipelineVoiceProvider();
+  } else {
+    _provider = new MockVoiceProvider();
   }
 
-  return new MockVoiceProvider();
+  return _provider;
 }
 
 export type { VoiceProvider, TranscriptEvent, SessionResult } from "./types";
