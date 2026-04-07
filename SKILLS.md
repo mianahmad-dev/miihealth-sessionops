@@ -12,4 +12,4 @@ This project was developed using Claude Code (Anthropic) with a structured harne
 
 ## Skills Folder
 
-The `/.claude/skills` directory contains reusable prompt skills used during development.
+Skills were invoked at development time via the Claude Code CLI's built-in skill system (e.g. `/commit`, `/simplify`). No separate `skills/` directory was created — the harness configuration in `CLAUDE.md` and `AGENTS.md` served as the persistent skill definition.

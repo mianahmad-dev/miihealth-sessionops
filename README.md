@@ -102,7 +102,7 @@ The script installs Node 20, clones the repo, runs migrations, seeds, builds, an
 ## Design Decisions
 
 - **SQLite over Postgres** — zero-ops for a single-VM internal tool; Drizzle makes migration to Postgres trivial if needed
-- **Mock voice provider as default** — entire app works with no API keys; enables rapid local dev and CI
+- **OpenAI-only voice pipeline** — `OPENAI_API_KEY` is required; there is no mock fallback. Browser Web Speech API handles STT/TTS, eliminating audio streaming infrastructure entirely
 - **SSE over WebSocket** — one-way server→client transcript streaming is all that's needed; SSE is simpler and HTTP/2 compatible
 - **Server Actions for mutations** — co-located with pages, automatic CSRF protection, no separate REST layer to maintain
 - **Role enforcement in Server Actions** — UI hides controls from viewers, but the backend enforces it independently
@@ -115,6 +115,8 @@ The script installs Node 20, clones the repo, runs migrations, seeds, builds, an
 - Browser SpeechSynthesis TTS is voice/quality limited by browser and OS support
 - No session reconnect — if the browser tab closes during a live session, the session is orphaned in `active` state; requires manual intervention to mark it failed
 - In-memory voice provider state — a server restart during an active session will lose the session context; the session will be stuck in `active` status
+- **STT and TTS timing not captured in observability** — Web Speech API and Browser SpeechSynthesis run entirely in-browser with no server-side instrumentation; `session_traces` records `llmMs` and `toolMs` but cannot measure speech recognition or playback latency
+- **Error count not tracked per turn** — turn-level errors are not counted as a discrete metric in `session_traces`; failures surface as session status changes (`failed` / `needs_review`) rather than per-turn error counts
 
 ## What's Next (Given More Time)
 
