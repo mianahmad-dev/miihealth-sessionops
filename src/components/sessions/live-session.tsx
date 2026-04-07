@@ -72,15 +72,24 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
   const [lastSpeaker, setLastSpeaker] = useState<"user" | "assistant" | null>(null);
   const [interimText, setInterimText] = useState("");
   const [isSending, setIsSending] = useState(false);
+  // micReady = recognition is running and accepting input (not suppressed by TTS)
+  // ttsPlaying = an utterance is currently being spoken
+  const [micReady, setMicReady] = useState(false);
+  const [ttsPlaying, setTtsPlaying] = useState(false);
 
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
   const startTimeRef = useRef<number>(Date.now());
-  // TTS state
+
+  // TTS echo suppression — three layered guards:
+  //   1. ttsQueueRef > 0     → utterance(s) currently playing or queued
+  //   2. Date.now() < micOpenAtRef  → cooldown window after last utterance ends
+  //   3. speechSynthesis.speaking   → browser ground-truth (handles edge cases)
   const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
   const spokenIdsRef = useRef<Set<string>>(new Set());
-  const ttsActiveRef = useRef(false);
+  const ttsQueueRef = useRef(0);       // # utterances in flight (not a boolean — handles queuing)
+  const micOpenAtRef = useRef<number>(0); // earliest ms at which results should be trusted
 
   // Preload TTS voices — getVoices() returns [] on first call in most browsers
   useEffect(() => {
@@ -132,18 +141,39 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
         const bestVoice = pickVoice(voicesRef.current, bcp47);
         if (bestVoice) utterance.voice = bestVoice;
 
-        // Abort recognition immediately — stop() still processes buffered audio
-        // which causes the assistant's voice to be transcribed as user speech
-        ttsActiveRef.current = true;
+        // Abort recognition immediately — this hard-clears Chrome's STT audio
+        // pipeline so no echo audio can ever produce a result. Without abort(),
+        // Chrome's 1–3 s STT latency means echo captured during TTS arrives as
+        // a "final" result long after the utterance ends, past any cooldown window.
+        ttsQueueRef.current++;
+        setTtsPlaying(true);
+        setMicReady(false);
+        setInterimText("");
         recognitionRef.current?.abort();
 
-        utterance.onend = () => {
-          // Small delay to let speaker output fully decay before mic reopens
+        // onTTSDone fires on both clean end AND error/cancel.
+        // Chrome only fires onend for the currently-playing utterance on cancel() —
+        // queued utterances receive onerror("interrupted") instead of onend.
+        // Handling both guarantees the counter always drains to 0.
+        const onTTSDone = () => {
+          ttsQueueRef.current = Math.max(0, ttsQueueRef.current - 1);
+          if (ttsQueueRef.current > 0) return; // more utterances still in flight
+          setTtsPlaying(false);
+          // Short cooldown for speaker acoustic decay. Can be short because abort()
+          // already cleared the pipeline — we're not waiting for buffered echo.
+          const delay = 300;
+          micOpenAtRef.current = Date.now() + delay;
           setTimeout(() => {
-            ttsActiveRef.current = false;
-            try { recognitionRef.current?.start(); } catch { /* already running */ }
-          }, 400);
+            if (ttsQueueRef.current > 0) return; // another utterance queued in the gap
+            try {
+              recognitionRef.current?.start();
+              setMicReady(true);
+            } catch { /* already running */ }
+          }, delay);
         };
+
+        utterance.onend = onTTSDone;
+        utterance.onerror = onTTSDone;
 
         window.speechSynthesis.speak(utterance);
       }
@@ -152,6 +182,8 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
     es.addEventListener("end", (e) => {
       const data = JSON.parse(e.data) as { status: string; sessionId: string };
       es.close();
+      ttsQueueRef.current = 0;
+      setTtsPlaying(false);
       window.speechSynthesis?.cancel();
       if (data.status === "completed" || data.status === "needs_review") {
         router.push(`/sessions/${sessionId}`);
@@ -164,13 +196,16 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
     es.onerror = () => es.close();
     return () => {
       es.close();
+      ttsQueueRef.current = 0;
+      setTtsPlaying(false);
       window.speechSynthesis?.cancel();
     };
   }, [sessionId, router, assistantLanguage]);
 
   // ─── Web Speech API (SpeechRecognition) ────────────────────────────────────
-  // Chrome stops recognition after silence — onend handler restarts it unless
-  // TTS is active (to avoid echo) or the session is being torn down.
+  // Chrome stops recognition after ~60 s of silence — onend restarts it unless
+  // the session is torn down. We never abort during TTS; recognition runs
+  // continuously and onresult simply discards results while suppressed.
   useEffect(() => {
     if (uiStatus !== "active") return;
 
@@ -197,6 +232,20 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
     recognitionRef.current = recognition;
 
     recognition.onresult = (e: SpeechRecognitionEvent) => {
+      // Three-layer guard — discard results that are or could be TTS echo:
+      //   1. An utterance is actively queued/playing
+      //   2. We're within the post-TTS acoustic cooldown window
+      //   3. The browser reports speech synthesis is still active (catches edge cases
+      //      where onend fires slightly early on some browser versions)
+      if (
+        ttsQueueRef.current > 0 ||
+        Date.now() < micOpenAtRef.current ||
+        window.speechSynthesis.speaking
+      ) {
+        setInterimText("");
+        return;
+      }
+
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const result = e.results[i];
@@ -222,14 +271,22 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
     };
 
     recognition.onend = () => {
-      // Auto-restart unless we're torn down or TTS is speaking
-      if (!stopped && !ttsActiveRef.current) {
-        try { recognition.start(); } catch { /* already starting */ }
+      setMicReady(false);
+      // Fires on: (a) Chrome's ~60 s silence timeout, (b) our TTS abort() call.
+      // For case (b) we must not restart — onTTSDone handles the restart after
+      // TTS finishes. For case (a) we restart only once TTS is done and the
+      // cooldown has cleared, so no echo audio can enter the fresh session.
+      if (!stopped && ttsQueueRef.current === 0 && Date.now() >= micOpenAtRef.current) {
+        try {
+          recognition.start();
+          setMicReady(true);
+        } catch { /* already starting */ }
       }
     };
 
     try {
       recognition.start();
+      setMicReady(true);
     } catch {
       // Already started
     }
@@ -239,6 +296,7 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
       recognition.abort();
       recognitionRef.current = null;
       setInterimText("");
+      setMicReady(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiStatus]);
@@ -274,6 +332,21 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
 
     async function start() {
       try {
+        // Gate on mic permission before creating a session — no session should
+        // exist in the DB if the user hasn't allowed microphone access.
+        let stream: MediaStream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch {
+          if (controller.signal.aborted) return;
+          setUiStatus("mic_denied");
+          return;
+        }
+        // Release the stream immediately — SpeechRecognition manages its own handle.
+        stream.getTracks().forEach((t) => t.stop());
+
+        if (controller.signal.aborted) return;
+
         const res = await fetch("/api/sessions/create", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -310,6 +383,7 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
     return () => {
       controller.abort();
       eventSourceRef.current?.close();
+      ttsQueueRef.current = 0;
       window.speechSynthesis?.cancel();
       recognitionRef.current?.abort();
     };
@@ -321,6 +395,9 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
     if (!sid) return;
 
     setUiStatus("ending");
+    ttsQueueRef.current = 0;
+    setTtsPlaying(false);
+    setMicReady(false);
     window.speechSynthesis?.cancel();
     recognitionRef.current?.abort();
     recognitionRef.current = null;
@@ -420,18 +497,31 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
         </div>
       )}
 
-      <div className="h-6">
-        {isSending ? (
-          <p className="text-sm text-muted-foreground">Processing…</p>
-        ) : interimText ? (
-          <p className="text-sm text-muted-foreground italic truncate max-w-lg">
-            &ldquo;{interimText}&rdquo;
-          </p>
-        ) : lastSpeaker === "assistant" ? (
-          <p className="text-sm text-muted-foreground">{assistantName} is speaking…</p>
-        ) : (
-          <p className="text-sm text-muted-foreground">Listening…</p>
-        )}
+      <div className="rounded-md border bg-muted/40 px-4 py-3 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-2.5 min-w-0">
+          {isSending ? (
+            <p className="text-sm text-muted-foreground">Processing…</p>
+          ) : interimText ? (
+            <p className="text-sm text-muted-foreground italic truncate">
+              &ldquo;{interimText}&rdquo;
+            </p>
+          ) : ttsPlaying ? (
+            <p className="text-sm text-muted-foreground">{assistantName} is speaking…</p>
+          ) : micReady ? (
+            <>
+              <span className="relative flex h-3 w-3 shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-60" />
+                <span className="relative inline-flex h-3 w-3 rounded-full bg-primary" />
+              </span>
+              <span className="text-sm font-medium text-primary">Your turn — go ahead and speak</span>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">…</p>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground/60 shrink-0 hidden sm:block">
+          Wait for the blue signal before speaking
+        </p>
       </div>
 
       <TranscriptViewer events={transcript} />
