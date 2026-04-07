@@ -120,6 +120,7 @@ The script installs Node 20, clones the repo, runs migrations, seeds, builds, an
 
 ## What's Next (Given More Time)
 
+- **OpenAI Realtime API** — the current pipeline is Web Speech API (browser STT) → GPT-4o-mini (text) → Browser SpeechSynthesis (TTS), which introduces turn-by-turn latency and browser-quality TTS. OpenAI's Realtime API handles STT, LLM, and TTS in a single low-latency WebSocket stream, producing significantly better voice quality and natural conversation flow. The only reason it wasn't used here is cost — Realtime API pricing is substantially higher than standard GPT-4o-mini text calls, which made it impractical for a take-home prototype. For a production system this would be the right choice.
 - Postgres migration for multi-instance deployments
 - WebRTC for lower-latency audio capture vs. MediaRecorder chunks
 - Redis pub/sub for real-time transcript push instead of polling

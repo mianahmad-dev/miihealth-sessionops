@@ -126,6 +126,7 @@ Every turn saves `llmMs`, `toolMs`, `totalMs`, `toolCallCount`, and a full `cont
 
 ## Known Gaps (Documented, Not Swept Under the Rug)
 
+- **OpenAI Realtime API not used — cost constraint** — the voice pipeline (Web Speech API → GPT-4o-mini text → Browser SpeechSynthesis) works but has turn-by-turn latency and browser-quality TTS. OpenAI's Realtime API would produce far better voice quality and sub-second response times via a single WebSocket stream, but its pricing is significantly higher than standard GPT-4o-mini calls. This was a deliberate trade-off for the take-home scope, not a technical limitation.
 - **No rate limiting** on `/api/sessions/create` or auth endpoints — straightforward to add with `upstash/ratelimit` or a middleware token bucket, out of scope for the take-home timeframe
 - **In-memory session state** — `activeSessions` and the session registry are process-local; multi-instance deployment would require Redis or a DB-backed session store
 - **Web Speech API is Chrome/Edge only** — acceptable for an internal tool; a production system targeting broader reach would need server-side STT

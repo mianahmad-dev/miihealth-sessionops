@@ -69,7 +69,6 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
   const [transcript, setTranscript] = useState<TranscriptRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
-  const [lastSpeaker, setLastSpeaker] = useState<"user" | "assistant" | null>(null);
   const [interimText, setInterimText] = useState("");
   const [isSending, setIsSending] = useState(false);
   // micReady = recognition is running and accepting input (not suppressed by TTS)
@@ -124,7 +123,6 @@ export function LiveSession({ assistantId, assistantName, assistantLanguage }: P
         if (prev.some((t) => t.id === event.id)) return prev;
         return [...prev, event];
       });
-      if (event.speaker !== "system") setLastSpeaker(event.speaker);
 
       // TTS — deduplicated by event ID to prevent replay on SSE reconnect
       if (

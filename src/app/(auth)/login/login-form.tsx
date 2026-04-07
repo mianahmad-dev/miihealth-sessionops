@@ -50,7 +50,7 @@ export default function LoginForm() {
 
         <div className="space-y-5">
           <blockquote className="text-2xl font-light leading-snug text-primary-foreground/90">
-            "Configure, launch, and review AI-powered voice intake assistants — all in one place."
+            &ldquo;Configure, launch, and review AI-powered voice intake assistants — all in one place.&rdquo;
           </blockquote>
           <div className="flex gap-3">
             <FeaturePill label="Voice Intake" />
