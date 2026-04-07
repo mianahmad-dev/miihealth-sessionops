@@ -1,14 +1,16 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { assistants } from "@/lib/db/schema";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth/helpers";
 import { Button } from "@/components/ui/button";
 import { AssistantTable } from "@/components/assistants/assistant-table";
 
 export default async function AssistantsPage() {
   const user = await requireAuth();
-  const rows = await db.select().from(assistants).orderBy(desc(assistants.updatedAt));
+  const rows = user.role === "viewer"
+    ? await db.select().from(assistants).where(eq(assistants.status, "published")).orderBy(desc(assistants.updatedAt))
+    : await db.select().from(assistants).orderBy(desc(assistants.updatedAt));
 
   return (
     <div className="space-y-6">

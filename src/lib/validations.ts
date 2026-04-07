@@ -11,6 +11,7 @@ export const createAssistantSchema = z.object({
   language: z.string().min(1),
   voice: z.string().min(1),
   tools: z.array(z.string()).default([]),
+  memoryMode: z.enum(["full", "window"]).default("full"),
 });
 
 export const updateAssistantSchema = createAssistantSchema.partial();

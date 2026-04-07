@@ -2,17 +2,23 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bot, History, ClipboardList } from "lucide-react";
+import { Bot, History, ClipboardList, FlaskConical } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const navItems = [
-  { href: "/assistants", label: "Assistants", icon: Bot },
-  { href: "/sessions", label: "Sessions", icon: History },
-  { href: "/audit", label: "Audit Log", icon: ClipboardList },
+const allNavItems = [
+  { href: "/assistants", label: "Assistants", icon: Bot, adminOnly: false },
+  { href: "/sessions", label: "Sessions", icon: History, adminOnly: false },
+  { href: "/audit", label: "Audit Log", icon: ClipboardList, adminOnly: true },
+  { href: "/evaluation", label: "Evaluation", icon: FlaskConical, adminOnly: true },
 ];
 
-export function Sidebar() {
+interface SidebarProps {
+  role: "admin" | "viewer";
+}
+
+export function Sidebar({ role }: SidebarProps) {
   const pathname = usePathname();
+  const navItems = allNavItems.filter((item) => !item.adminOnly || role === "admin");
 
   return (
     <aside className="w-56 border-r bg-muted/40 flex flex-col min-h-screen shrink-0">

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { sessions, transcriptEvents } from "@/lib/db/schema";
 import { getVoiceProvider } from "@/lib/voice";
 import { getProviderSessionId, unregisterSession } from "@/lib/voice/session-registry";
+import { getCurrentUser } from "@/lib/auth/helpers";
 import { v4 as uuidv4 } from "uuid";
 import { eq, max, and, sql } from "drizzle-orm";
 
@@ -10,6 +11,11 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { id: sessionId } = await params;
 
   const session = await db
@@ -20,6 +26,10 @@ export async function POST(
 
   if (!session) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
+  }
+
+  if (user.role !== "admin" && session.operatorId !== user.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   if (

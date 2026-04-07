@@ -8,7 +8,7 @@ SessionOps Studio — B2B internal console for voice intake assistants. Next.js 
 This project is built phase-by-phase. I will tell you which phase to work on. Before starting any phase, read `docs/SPEC.md` for data model, folder structure, constants, provider contracts, and component specs. Read `AGENTS.md` for coding conventions. Do only what the current phase asks — nothing more.
 
 ## Rules
-- Mock voice provider is DEFAULT. App must work with zero API keys
+- OPENAI_API_KEY is required. PipelineVoiceProvider is the only provider — no mock
 - All assistant mutations MUST write audit_logs
 - Role checks in Server Actions, not just UI
 - Draft assistants cannot launch sessions — enforce on backend

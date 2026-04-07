@@ -4,7 +4,6 @@ import { NextResponse } from "next/server";
 export default auth((req) => {
   const { pathname } = req.nextUrl;
 
-  // Public paths
   if (pathname.startsWith("/login") || pathname.startsWith("/api/auth")) {
     return NextResponse.next();
   }
@@ -15,7 +14,6 @@ export default auth((req) => {
     return NextResponse.redirect(loginUrl);
   }
 
-  // Protect audit log to admin only
   if (pathname.startsWith("/audit")) {
     const role = (req.auth.user as { role?: string })?.role;
     if (role !== "admin") {

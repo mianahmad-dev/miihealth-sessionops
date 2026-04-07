@@ -39,7 +39,6 @@ Next.js 15 (App Router), TypeScript strict, Drizzle ORM + SQLite (better-sqlite3
 - Every assistant mutation writes to audit_logs table
 - Version field increments on every assistant edit
 - Summaries always labeled "DRAFT — For staff review only"
-- Mock voice provider is the default (VOICE_PROVIDER=mock)
 
 ## Error Handling
 - Every page must have empty, loading, and error states

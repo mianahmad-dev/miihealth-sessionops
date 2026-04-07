@@ -40,7 +40,11 @@ export default async function LiveSessionPage({ params }: Props) {
 
   return (
     <div className="flex flex-col">
-      <LiveSession assistantId={assistant.id} assistantName={assistant.name} />
+      <LiveSession
+        assistantId={assistant.id}
+        assistantName={assistant.name}
+        assistantLanguage={assistant.language}
+      />
     </div>
   );
 }

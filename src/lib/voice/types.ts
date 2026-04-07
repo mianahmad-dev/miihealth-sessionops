@@ -11,13 +11,50 @@ export interface SessionResult {
   errorReason?: string;
 }
 
+export interface StartSessionResult {
+  sessionId: string;
+  initialEvents: TranscriptEvent[];
+}
+
+// ─── Observability types ───────────────────────────────────────────────────────
+
+export interface ToolInvocationTrace {
+  toolName: string;
+  args: Record<string, unknown>;
+  result: string;
+  durationMs: number;
+  success: boolean;
+}
+
+export interface TurnTrace {
+  llmMs: number;
+  toolMs: number;
+  totalMs: number;
+  toolCallCount: number;
+  toolInvocations: ToolInvocationTrace[];
+  contextMessageCount: number;
+  /** JSON-serialized array of messages sent to the model — for debug inspection */
+  contextSnapshot: string;
+}
+
+export interface SendTextResult {
+  events: TranscriptEvent[];
+  trace: TurnTrace;
+}
+
+// ─── Provider config ───────────────────────────────────────────────────────────
+
+export interface StartSessionConfig {
+  purpose: string;
+  language: string;
+  voice: string;
+  tools: string[];
+  /** "full" keeps full history; "window" keeps last 20 messages (10 turns) */
+  memoryMode?: "full" | "window";
+}
+
 export interface VoiceProvider {
-  startSession(assistantConfig: {
-    purpose: string;
-    language: string;
-    voice: string;
-    tools: string[];
-  }): Promise<string>;
-  sendAudio(sessionId: string, audioChunk: Blob): Promise<TranscriptEvent[]>;
+  startSession(config: StartSessionConfig): Promise<StartSessionResult>;
+  sendText(sessionId: string, userText: string): Promise<SendTextResult>;
   endSession(sessionId: string): Promise<SessionResult>;
 }

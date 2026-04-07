@@ -2,12 +2,34 @@ import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { sessions, transcriptEvents } from "@/lib/db/schema";
 import { eq, gt, and, asc } from "drizzle-orm";
+import { getCurrentUser } from "@/lib/auth/helpers";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const user = await getCurrentUser();
+  if (!user) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
   const { id: sessionId } = await params;
+
+  // Ownership check: viewers and admins can only read their own sessions;
+  // admins can read any session.
+  const session = await db
+    .select({ operatorId: sessions.operatorId })
+    .from(sessions)
+    .where(eq(sessions.id, sessionId))
+    .get();
+
+  if (!session) {
+    return new Response("Session not found", { status: 404 });
+  }
+  if (user.role !== "admin" && session.operatorId !== user.id) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({

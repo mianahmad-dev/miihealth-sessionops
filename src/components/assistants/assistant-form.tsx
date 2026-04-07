@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { APPROVED_TOOLS, LANGUAGES, VOICES } from "@/lib/constants";
+import { APPROVED_TOOLS, LANGUAGES, VOICES, MEMORY_MODES } from "@/lib/constants";
 import { createAssistant, updateAssistant } from "@/actions/assistants";
 
 type AssistantData = {
@@ -22,6 +22,7 @@ type AssistantData = {
   language: string;
   voice: string;
   tools: string | null;
+  memoryMode: string;
 };
 
 type Props = {
@@ -41,6 +42,7 @@ export function AssistantForm({ initialData }: Props) {
   const [purpose, setPurpose] = useState(initialData?.purpose ?? "");
   const [language, setLanguage] = useState(initialData?.language ?? "en");
   const [voice, setVoice] = useState(initialData?.voice ?? "default");
+  const [memoryMode, setMemoryMode] = useState(initialData?.memoryMode ?? "full");
   const [selectedTools, setSelectedTools] = useState<string[]>(parsedTools);
 
   function toggleTool(toolId: string) {
@@ -58,6 +60,7 @@ export function AssistantForm({ initialData }: Props) {
     formData.set("purpose", purpose);
     formData.set("language", language);
     formData.set("voice", voice);
+    formData.set("memoryMode", memoryMode);
     selectedTools.forEach((t) => formData.append("tools", t));
 
     startTransition(async () => {
@@ -133,6 +136,25 @@ export function AssistantForm({ initialData }: Props) {
             </SelectContent>
           </Select>
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-sm font-medium">Context Memory</label>
+        <Select value={memoryMode} onValueChange={(v) => setMemoryMode(v ?? "full")}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MEMORY_MODES.map((m) => (
+              <SelectItem key={m.value} value={m.value}>
+                {m.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          {MEMORY_MODES.find((m) => m.value === memoryMode)?.description}
+        </p>
       </div>
 
       <div className="space-y-2">

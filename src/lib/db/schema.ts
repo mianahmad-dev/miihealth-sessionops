@@ -20,6 +20,9 @@ export const assistants = sqliteTable("assistants", {
     .notNull()
     .default("draft"),
   tools: text("tools"),
+  memoryMode: text("memory_mode", { enum: ["full", "window"] })
+    .notNull()
+    .default("full"),
   version: integer("version").notNull().default(1),
   createdBy: text("created_by").references(() => users.id),
   createdAt: integer("created_at").notNull(),
@@ -70,5 +73,54 @@ export const auditLogs = sqliteTable("audit_logs", {
   entityType: text("entity_type", { enum: ["assistant", "session"] }).notNull(),
   entityId: text("entity_id").notNull(),
   changes: text("changes"),
+  createdAt: integer("created_at").notNull(),
+});
+
+// ─── AI observability: per-turn LLM/tool timing ──────────────────────────────
+
+export const sessionTraces = sqliteTable("session_traces", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id")
+    .notNull()
+    .references(() => sessions.id),
+  turnNum: integer("turn_num").notNull(),
+  llmMs: integer("llm_ms").notNull(),
+  toolMs: integer("tool_ms").notNull().default(0),
+  totalMs: integer("total_ms").notNull(),
+  toolCallCount: integer("tool_call_count").notNull().default(0),
+  contextMessageCount: integer("context_message_count").notNull(),
+  // JSON snapshot of messages sent to the model — for debug inspection
+  contextSnapshot: text("context_snapshot"),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const toolInvocations = sqliteTable("tool_invocations", {
+  id: text("id").primaryKey(),
+  sessionId: text("session_id")
+    .notNull()
+    .references(() => sessions.id),
+  turnNum: integer("turn_num").notNull(),
+  toolName: text("tool_name").notNull(),
+  args: text("args").notNull(),   // JSON
+  result: text("result"),          // JSON — null if call failed before returning
+  durationMs: integer("duration_ms").notNull(),
+  success: integer("success", { mode: "boolean" }).notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+// ─── Evaluation harness results ───────────────────────────────────────────────
+
+export const evaluationRuns = sqliteTable("evaluation_runs", {
+  id: text("id").primaryKey(),
+  ranAt: integer("ran_at").notNull(),
+  ranBy: text("ran_by").references(() => users.id),
+  sampleCount: integer("sample_count").notNull(),
+  // Metrics stored as integers (0-100 for percentages, raw ms for latency)
+  schemaValidityPct: integer("schema_validity_pct"),
+  avgLlmMs: integer("avg_llm_ms"),
+  toolSuccessPct: integer("tool_success_pct"),
+  escalationPrecisionPct: integer("escalation_precision_pct"),
+  // Full JSON blob with per-sample detail
+  results: text("results").notNull(),
   createdAt: integer("created_at").notNull(),
 });

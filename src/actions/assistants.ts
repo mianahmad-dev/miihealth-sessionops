@@ -20,6 +20,7 @@ export async function createAssistant(formData: FormData): Promise<ActionResult>
     language: formData.get("language") as string,
     voice: formData.get("voice") as string,
     tools: formData.getAll("tools") as string[],
+    memoryMode: (formData.get("memoryMode") as string) || "full",
   };
 
   const parsed = createAssistantSchema.safeParse(raw);
@@ -37,6 +38,7 @@ export async function createAssistant(formData: FormData): Promise<ActionResult>
     language: parsed.data.language,
     voice: parsed.data.voice,
     tools: JSON.stringify(parsed.data.tools),
+    memoryMode: parsed.data.memoryMode,
     status: "draft",
     version: 1,
     createdBy: user.id,
@@ -58,6 +60,7 @@ export async function updateAssistant(id: string, formData: FormData): Promise<A
     language: formData.get("language") as string,
     voice: formData.get("voice") as string,
     tools: formData.getAll("tools") as string[],
+    memoryMode: (formData.get("memoryMode") as string) || "full",
   };
 
   const parsed = createAssistantSchema.safeParse(raw);
@@ -78,6 +81,7 @@ export async function updateAssistant(id: string, formData: FormData): Promise<A
       language: parsed.data.language,
       voice: parsed.data.voice,
       tools: JSON.stringify(parsed.data.tools),
+      memoryMode: parsed.data.memoryMode,
       version: current.version + 1,
       updatedAt: now,
     })
@@ -130,6 +134,7 @@ export async function duplicateAssistant(id: string): Promise<ActionResult> {
     language: original.language,
     voice: original.voice,
     tools: original.tools,
+    memoryMode: original.memoryMode,
     status: "draft",
     version: 1,
     createdBy: user.id,

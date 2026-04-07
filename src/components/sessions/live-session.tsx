@@ -4,21 +4,56 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { TranscriptViewer, type TranscriptRow } from "@/components/sessions/transcript-viewer";
-import { createSession, updateSessionStatus } from "@/actions/sessions";
+import { updateSessionStatus } from "@/actions/sessions";
+
+// BCP-47 tags for SpeechSynthesis & SpeechRecognition
+const LANG_BCP47: Record<string, string> = {
+  en: "en-US",
+  de: "de-DE",
+  es: "es-ES",
+  fr: "fr-FR",
+};
+
+// Pick the best available TTS voice for a language.
+// Priority: cloud/online (Google, MS Online) > decent local > any matching
+function pickVoice(voices: SpeechSynthesisVoice[], bcp47: string): SpeechSynthesisVoice | null {
+  const prefix = bcp47.split("-")[0].toLowerCase();
+  const candidates = voices.filter((v) => v.lang.toLowerCase().startsWith(prefix));
+  if (candidates.length === 0) return null;
+  const cloud = candidates.find((v) => !v.localService);
+  if (cloud) return cloud;
+  const decent = candidates.find((v) => !/espeak|compact|microsoft sam/i.test(v.name));
+  return decent ?? candidates[0];
+}
+
+// Minimal SpeechRecognition type shim — not in TS lib by default
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+interface SpeechRecognitionInstance extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult: ((e: SpeechRecognitionEvent) => void) | null;
+  onerror: ((e: Event & { error: string }) => void) | null;
+  onend: (() => void) | null;
+}
 
 type UIStatus =
-  | "mic_check"
   | "mic_denied"
   | "initializing"
   | "active"
   | "ending"
-  | "completed"
-  | "needs_review"
   | "failed";
 
 interface Props {
   assistantId: string;
   assistantName: string;
+  assistantLanguage: string;
 }
 
 function formatTime(sec: number): string {
@@ -27,20 +62,37 @@ function formatTime(sec: number): string {
   return `${m}:${s}`;
 }
 
-export function LiveSession({ assistantId, assistantName }: Props) {
+export function LiveSession({ assistantId, assistantName, assistantLanguage }: Props) {
   const router = useRouter();
-  const [uiStatus, setUiStatus] = useState<UIStatus>("mic_check");
+  const [uiStatus, setUiStatus] = useState<UIStatus>("initializing");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<TranscriptRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [lastSpeaker, setLastSpeaker] = useState<"user" | "assistant" | null>(null);
+  const [interimText, setInterimText] = useState("");
+  const [isSending, setIsSending] = useState(false);
 
-  const streamRef = useRef<MediaStream | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const startTimeRef = useRef<number>(Date.now());
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const startTimeRef = useRef<number>(Date.now());
+  // TTS state
+  const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
+  const spokenIdsRef = useRef<Set<string>>(new Set());
+  const ttsActiveRef = useRef(false);
+
+  // Preload TTS voices — getVoices() returns [] on first call in most browsers
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const load = () => {
+      const v = window.speechSynthesis.getVoices();
+      if (v.length > 0) voicesRef.current = v;
+    };
+    load();
+    window.speechSynthesis.addEventListener("voiceschanged", load);
+    return () => window.speechSynthesis.removeEventListener("voiceschanged", load);
+  }, []);
 
   // Timer — only ticks when active
   useEffect(() => {
@@ -54,7 +106,6 @@ export function LiveSession({ assistantId, assistantName }: Props) {
   // SSE connection — opens when sessionId is set
   useEffect(() => {
     if (!sessionId) return;
-
     const es = new EventSource(`/api/sessions/${sessionId}/stream`);
     eventSourceRef.current = es;
 
@@ -64,14 +115,44 @@ export function LiveSession({ assistantId, assistantName }: Props) {
         if (prev.some((t) => t.id === event.id)) return prev;
         return [...prev, event];
       });
-      if (event.speaker !== "system") {
-        setLastSpeaker(event.speaker);
+      if (event.speaker !== "system") setLastSpeaker(event.speaker);
+
+      // TTS — deduplicated by event ID to prevent replay on SSE reconnect
+      if (
+        event.speaker === "assistant" &&
+        !spokenIdsRef.current.has(event.id) &&
+        typeof window !== "undefined" &&
+        "speechSynthesis" in window
+      ) {
+        spokenIdsRef.current.add(event.id);
+        const bcp47 = LANG_BCP47[assistantLanguage] ?? "en-US";
+        const utterance = new SpeechSynthesisUtterance(event.content);
+        utterance.lang = bcp47;
+        utterance.rate = 1.05;
+        const bestVoice = pickVoice(voicesRef.current, bcp47);
+        if (bestVoice) utterance.voice = bestVoice;
+
+        // Abort recognition immediately — stop() still processes buffered audio
+        // which causes the assistant's voice to be transcribed as user speech
+        ttsActiveRef.current = true;
+        recognitionRef.current?.abort();
+
+        utterance.onend = () => {
+          // Small delay to let speaker output fully decay before mic reopens
+          setTimeout(() => {
+            ttsActiveRef.current = false;
+            try { recognitionRef.current?.start(); } catch { /* already running */ }
+          }, 400);
+        };
+
+        window.speechSynthesis.speak(utterance);
       }
     });
 
     es.addEventListener("end", (e) => {
       const data = JSON.parse(e.data) as { status: string; sessionId: string };
       es.close();
+      window.speechSynthesis?.cancel();
       if (data.status === "completed" || data.status === "needs_review") {
         router.push(`/sessions/${sessionId}`);
       } else {
@@ -81,76 +162,144 @@ export function LiveSession({ assistantId, assistantName }: Props) {
     });
 
     es.onerror = () => es.close();
+    return () => {
+      es.close();
+      window.speechSynthesis?.cancel();
+    };
+  }, [sessionId, router, assistantLanguage]);
 
-    return () => es.close();
-  }, [sessionId, router]);
-
-  // MediaRecorder — starts when active
+  // ─── Web Speech API (SpeechRecognition) ────────────────────────────────────
+  // Chrome stops recognition after silence — onend handler restarts it unless
+  // TTS is active (to avoid echo) or the session is being torn down.
   useEffect(() => {
-    if (uiStatus !== "active" || !streamRef.current || !sessionIdRef.current) return;
+    if (uiStatus !== "active") return;
 
-    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-      ? "audio/webm;codecs=opus"
-      : MediaRecorder.isTypeSupported("audio/webm")
-      ? "audio/webm"
-      : undefined;
+    const SpeechRecognitionCtor = (
+      (window as unknown as { SpeechRecognition?: new () => SpeechRecognitionInstance })
+        .SpeechRecognition ??
+      (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionInstance })
+        .webkitSpeechRecognition
+    );
 
-    const recorder = new MediaRecorder(streamRef.current, mimeType ? { mimeType } : undefined);
+    if (!SpeechRecognitionCtor) {
+      setError("Speech recognition is not supported in this browser. Please use Chrome or Edge.");
+      setUiStatus("failed");
+      return;
+    }
 
-    recorder.ondataavailable = async (e) => {
-      const sid = sessionIdRef.current;
-      if (e.data.size > 0 && sid) {
-        const formData = new FormData();
-        formData.append("audio", e.data, "audio.webm");
-        formData.append("sessionId", sid);
-        try {
-          await fetch("/api/voice/process", { method: "POST", body: formData });
-        } catch {
-          // ignore chunk send errors; transcript still visible via SSE
+    let stopped = false;
+    const bcp47 = LANG_BCP47[assistantLanguage] ?? "en-US";
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = bcp47;
+    recognitionRef.current = recognition;
+
+    recognition.onresult = (e: SpeechRecognitionEvent) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const result = e.results[i];
+        if (result.isFinal) {
+          const text = result[0].transcript.trim();
+          if (text) {
+            setInterimText("");
+            void handleSendText(text);
+          }
+        } else {
+          interim += result[0].transcript;
         }
+      }
+      setInterimText(interim);
+    };
+
+    recognition.onerror = (e) => {
+      if (e.error === "not-allowed" || e.error === "permission-denied") {
+        stopped = true;
+        setUiStatus("mic_denied");
+      }
+      // Other errors (network, no-speech, aborted) — let onend handle restart
+    };
+
+    recognition.onend = () => {
+      // Auto-restart unless we're torn down or TTS is speaking
+      if (!stopped && !ttsActiveRef.current) {
+        try { recognition.start(); } catch { /* already starting */ }
       }
     };
 
-    recorder.start(3000); // emit chunk every 3 s
-    recorderRef.current = recorder;
+    try {
+      recognition.start();
+    } catch {
+      // Already started
+    }
 
     return () => {
-      if (recorder.state !== "inactive") recorder.stop();
+      stopped = true;
+      recognition.abort();
+      recognitionRef.current = null;
+      setInterimText("");
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uiStatus]);
 
-  // Session startup — runs once on mount
-  useEffect(() => {
-    async function start() {
-      // 1. Request mic
-      let stream: MediaStream;
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        streamRef.current = stream;
-      } catch (err) {
-        const name = err instanceof Error ? err.name : "";
-        if (name === "NotAllowedError" || name === "PermissionDeniedError") {
-          setUiStatus("mic_denied");
-        } else {
-          setError(err instanceof Error ? err.message : "Microphone unavailable");
-          setUiStatus("failed");
-        }
-        return;
+  async function handleSendText(text: string) {
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    setIsSending(true);
+    try {
+      const res = await fetch("/api/voice/text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: sid, text }),
+      });
+      if (!res.ok) {
+        const body = (await res.json()) as { error?: string };
+        setError(`Turn failed: ${body.error ?? res.statusText}. The turn was not saved.`);
       }
+    } catch {
+      setError("Network error — this turn was not saved. Check your connection and continue speaking.");
+    } finally {
+      setIsSending(false);
+    }
+  }
 
-      // 2. Create session
-      setUiStatus("initializing");
+  // ─── Session startup ────────────────────────────────────────────────────────
+  // AbortController prevents React Strict Mode from creating two sessions.
+  // Strict Mode runs effects twice in dev: mount → cleanup → mount.
+  // The cleanup aborts the first run before it can create a session; the second
+  // run proceeds normally and creates exactly one session.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function start() {
       try {
-        const { sessionId: sid } = await createSession(assistantId);
+        const res = await fetch("/api/sessions/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assistantId }),
+          signal: controller.signal,
+        });
+
+        if (controller.signal.aborted) return;
+
+        const body = (await res.json()) as { sessionId?: string; error?: string };
+
+        if (!res.ok) {
+          throw new Error(body.error ?? "Failed to start session");
+        }
+
+        const sid = body.sessionId!;
         setSessionId(sid);
         sessionIdRef.current = sid;
 
-        // 3. Transition to active
         await updateSessionStatus(sid, "active");
+        if (controller.signal.aborted) return;
+
         startTimeRef.current = Date.now();
         setUiStatus("active");
       } catch (err) {
-        stream.getTracks().forEach((t) => t.stop());
+        if (controller.signal.aborted) return;
         setError(err instanceof Error ? err.message : "Failed to start session");
         setUiStatus("failed");
       }
@@ -159,8 +308,10 @@ export function LiveSession({ assistantId, assistantName }: Props) {
     start();
 
     return () => {
-      streamRef.current?.getTracks().forEach((t) => t.stop());
+      controller.abort();
       eventSourceRef.current?.close();
+      window.speechSynthesis?.cancel();
+      recognitionRef.current?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -170,11 +321,9 @@ export function LiveSession({ assistantId, assistantName }: Props) {
     if (!sid) return;
 
     setUiStatus("ending");
-
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop();
-    }
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    window.speechSynthesis?.cancel();
+    recognitionRef.current?.abort();
+    recognitionRef.current = null;
     eventSourceRef.current?.close();
 
     await updateSessionStatus(sid, "ending");
@@ -195,7 +344,7 @@ export function LiveSession({ assistantId, assistantName }: Props) {
     }
   }
 
-  // --- Render states ---
+  // ─── Render states ──────────────────────────────────────────────────────────
 
   if (uiStatus === "mic_denied") {
     return (
@@ -203,30 +352,19 @@ export function LiveSession({ assistantId, assistantName }: Props) {
         <div className="space-y-2">
           <h2 className="text-lg font-semibold">Microphone Access Required</h2>
           <p className="text-sm text-muted-foreground max-w-sm">
-            Allow microphone access in your browser, then click Retry. Without it the session
-            cannot capture audio.
+            Allow microphone access in your browser settings, then click Retry.
           </p>
         </div>
-        <Button
-          onClick={() => {
-            setUiStatus("mic_check");
-            // Re-trigger startup by forcing a page refresh — simplest retry path
-            window.location.reload();
-          }}
-        >
-          Retry
-        </Button>
+        <Button onClick={() => window.location.reload()}>Retry</Button>
       </div>
     );
   }
 
-  if (uiStatus === "mic_check" || uiStatus === "initializing") {
+  if (uiStatus === "initializing") {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
         <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-        <p className="text-sm text-muted-foreground">
-          {uiStatus === "mic_check" ? "Requesting microphone access…" : "Connecting…"}
-        </p>
+        <p className="text-sm text-muted-foreground">Connecting…</p>
       </div>
     );
   }
@@ -257,7 +395,6 @@ export function LiveSession({ assistantId, assistantName }: Props) {
   // active
   return (
     <div className="flex flex-col gap-4">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="space-y-0.5">
           <h1 className="text-xl font-semibold">{assistantName}</h1>
@@ -274,18 +411,29 @@ export function LiveSession({ assistantId, assistantName }: Props) {
         </Button>
       </div>
 
-      {/* Speaker indicator */}
-      <div className="h-5">
-        {lastSpeaker && (
-          <p className="text-sm text-muted-foreground">
-            {lastSpeaker === "assistant"
-              ? `${assistantName} is speaking…`
-              : "Patient is speaking…"}
+      {error && (
+        <div className="rounded-md border border-destructive/30 bg-destructive/8 px-3 py-2 text-sm text-destructive flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="ml-4 text-xs underline">
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      <div className="h-6">
+        {isSending ? (
+          <p className="text-sm text-muted-foreground">Processing…</p>
+        ) : interimText ? (
+          <p className="text-sm text-muted-foreground italic truncate max-w-lg">
+            &ldquo;{interimText}&rdquo;
           </p>
+        ) : lastSpeaker === "assistant" ? (
+          <p className="text-sm text-muted-foreground">{assistantName} is speaking…</p>
+        ) : (
+          <p className="text-sm text-muted-foreground">Listening…</p>
         )}
       </div>
 
-      {/* Transcript */}
       <TranscriptViewer events={transcript} />
     </div>
   );

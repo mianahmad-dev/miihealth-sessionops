@@ -31,6 +31,7 @@ export interface SessionRow {
   startedAt: number | null;
   durationSec: number | null;
   turnCount: number | null;
+  operatorName?: string;
 }
 
 const STATUS_BADGE: Record<
@@ -65,6 +66,8 @@ interface SessionTableProps {
 export function SessionTable({ sessions, hideAssistantCol = false }: SessionTableProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+
+  const showOperator = sessions.some((s) => s.operatorName !== undefined);
 
   const filtered = sessions.filter((s) => {
     const matchesSearch = s.assistantName.toLowerCase().includes(search.toLowerCase());
@@ -111,6 +114,7 @@ export function SessionTable({ sessions, hideAssistantCol = false }: SessionTabl
               <TableRow>
                 <TableHead>Date</TableHead>
                 {!hideAssistantCol && <TableHead>Assistant</TableHead>}
+                {showOperator && <TableHead>Operator</TableHead>}
                 <TableHead>Version</TableHead>
                 <TableHead>Duration</TableHead>
                 <TableHead>Turns</TableHead>
@@ -126,6 +130,9 @@ export function SessionTable({ sessions, hideAssistantCol = false }: SessionTabl
                     <TableCell className="text-sm">{formatDate(session.startedAt)}</TableCell>
                     {!hideAssistantCol && (
                       <TableCell className="font-medium">{session.assistantName}</TableCell>
+                    )}
+                    {showOperator && (
+                      <TableCell className="text-sm text-muted-foreground">{session.operatorName ?? "—"}</TableCell>
                     )}
                     <TableCell className="text-sm text-muted-foreground">
                       v{session.assistantVersion}

@@ -15,8 +15,7 @@ Build "SessionOps Studio" — a browser-based B2B internal operations console fo
 - **Auth:** NextAuth.js v5 (Auth.js) with CredentialsProvider
 - **Styling:** Tailwind CSS 4 + shadcn/ui
 - **Validation:** Zod (+ drizzle-zod)
-- **Voice Pipeline (real):** Deepgram STT (HTTP API) → GPT-4o-mini → Browser SpeechSynthesis (free TTS)
-- **Voice Pipeline (mock):** Scripted conversations with simulated delays — DEFAULT mode
+- **Voice Pipeline:** Web Speech API (browser STT) → GPT-4o-mini → Browser SpeechSynthesis (TTS)
 - **Real-time transcript:** Server-Sent Events (SSE)
 - **Deployment:** Docker + PM2 for Ubuntu VM
 
@@ -138,10 +137,10 @@ sessionops-studio/
 │   │   │   ├── config.ts                 ← NextAuth config
 │   │   │   └── helpers.ts                ← getCurrentUser(), requireAdmin()
 │   │   ├── voice/
-│   │   │   ├── types.ts                  ← VoiceProvider interface
-│   │   │   ├── mock-provider.ts          ← default, free, scripted convos
-│   │   │   ├── pipeline-provider.ts      ← Deepgram STT + GPT-4o-mini + Browser TTS
-│   │   │   └── index.ts                  ← factory: reads VOICE_PROVIDER env
+│   │   │   ├── types.ts                  ← VoiceProvider interface + trace types
+│   │   │   ├── pipeline-provider.ts      ← Web Speech API + GPT-4o-mini + Browser SpeechSynthesis
+│   │   │   ├── session-registry.ts       ← maps DB session IDs → provider session IDs
+│   │   │   └── index.ts                  ← singleton factory, always PipelineVoiceProvider
 │   │   ├── audit.ts                      ← auditLog() helper
 │   │   ├── constants.ts                  ← APPROVED_TOOLS, VOICES, LANGUAGES
 │   │   └── validations.ts               ← Zod schemas
@@ -210,7 +209,7 @@ sessionops-studio/
     - Each writes audit log
 16. Role enforcement: Viewer sees all data but cannot create/edit/publish/archive. Hide or disable buttons.
 
-### Phase 3: Voice Provider Abstraction + Mock Provider
+### Phase 3: Voice Provider
 
 17. Define `VoiceProvider` interface in `src/lib/voice/types.ts`:
     ```typescript
@@ -228,35 +227,17 @@ sessionops-studio/
     }
 
     export interface VoiceProvider {
-      startSession(assistantConfig: {
-        purpose: string;
-        language: string;
-        voice: string;
-        tools: string[];
-      }): Promise<string>; // returns sessionId
-      sendAudio(sessionId: string, audioChunk: Blob): Promise<TranscriptEvent[]>;
+      startSession(config: StartSessionConfig): Promise<StartSessionResult>;
+      sendText(sessionId: string, userText: string): Promise<SendTextResult>;
       endSession(sessionId: string): Promise<SessionResult>;
     }
     ```
-18. Build mock provider (`mock-provider.ts`):
-    - Has 3-4 hardcoded conversation scripts (healthcare intake scenarios)
-    - `startSession()` picks a script based on assistant purpose keywords
-    - `sendAudio()` ignores the audio, returns next scripted user line + assistant response with realistic delays (300-800ms)
-    - `endSession()` returns full transcript + hardcoded structured summary
-    - Summary shape:
-      ```json
-      {
-        "chief_concern": "string",
-        "collected_fields": { "name": "...", "dob": "...", "symptoms": "..." },
-        "missing_fields": ["insurance_id", "allergies"],
-        "escalation_flags": [
-          { "flag": "Patient mentioned chest pain", "evidence": "Turn 4: 'I've been having chest pains'", "severity": "high" }
-        ],
-        "session_quality": "needs_review",
-        "draft_notes": "Patient intake partially complete. Escalation flag raised for chest pain mention. Recommend clinical follow-up before appointment."
-      }
-      ```
-19. Build provider factory (`src/lib/voice/index.ts`): reads `VOICE_PROVIDER` env, returns mock or pipeline
+18. Build `PipelineVoiceProvider` (`pipeline-provider.ts`):
+    - `startSession()` builds a system prompt from assistant config, calls GPT-4o-mini for greeting, stores session state in-memory
+    - `sendText()` appends user message to history, runs agentic GPT-4o-mini loop (up to 5 iterations for tool calls), returns transcript events + observability trace
+    - `endSession()` calls GPT-4o-mini with full transcript to generate structured JSON summary, clears in-memory state
+    - In-memory session state (`activeSessions` Map) is process-local — sessions are lost on server restart
+19. Build provider singleton (`src/lib/voice/index.ts`): always returns `PipelineVoiceProvider`; `OPENAI_API_KEY` is required
 
 ### Phase 4: Live Session Screen
 
@@ -281,11 +262,12 @@ sessionops-studio/
     - Send `event: transcript\ndata: {json}\n\n` format
     - Close stream when session status changes to completed/failed
 
-22. Create voice process endpoint (`/api/voice/process/route.ts`):
-    - Receives audio blob + sessionId
-    - Calls voiceProvider.sendAudio()
-    - Saves returned transcript events to DB
-    - Returns OK
+22. Create voice text endpoint (`/api/voice/text/route.ts`):
+    - Receives `{ sessionId, text }` — text from browser Web Speech API
+    - Calls `voiceProvider.sendText()` (GPT-4o-mini agentic loop)
+    - Saves returned transcript events to DB in a synchronous transaction
+    - Persists turn trace + tool invocations (best-effort)
+    - Returns `{ ok: true }`
 
 23. Create end session endpoint (`/api/sessions/[id]/end/route.ts`):
     - Calls voiceProvider.endSession()
@@ -353,35 +335,13 @@ sessionops-studio/
     ```
 33. .env.example:
     ```
-    NEXTAUTH_SECRET=generate-a-random-secret
+    AUTH_SECRET=generate-a-random-secret
     NEXTAUTH_URL=http://localhost:3000
-    VOICE_PROVIDER=mock
-    DEEPGRAM_API_KEY=your-key-here-only-needed-if-VOICE_PROVIDER=pipeline
-    OPENAI_API_KEY=your-key-here-only-needed-if-VOICE_PROVIDER=pipeline
+    OPENAI_API_KEY=your-openai-key-here
     DATABASE_URL=./sessionops.db
     ```
 34. GitHub Actions CI (`.github/workflows/ci.yml`): lint → type-check → build
 35. README.md with: project overview, arch summary (paste diagram), setup + run instructions, deployment instructions, design decisions, trade-offs, known limitations, what next with more time
-
----
-
-## Pipeline Voice Provider (Phase 3 Extension — Only After Mock Works)
-
-When implementing `pipeline-provider.ts`:
-
-```
-Browser: MediaRecorder captures audio → sends WebM blob to /api/voice/process
-Server:  Deepgram STT (POST /v1/listen, model=nova-2) → text
-Server:  GPT-4o-mini chat completion (conversation history + assistant purpose as system prompt) → response text
-Server:  Return response text to browser
-Browser: window.speechSynthesis.speak(new SpeechSynthesisUtterance(responseText))
-```
-
-- Deepgram: use HTTP pre-recorded API, not WebSocket. Simpler. Send audio blob, get text back.
-- GPT-4o-mini: maintain conversation history per session in memory (Map<sessionId, messages[]>). Send full history each turn.
-- Browser TTS: `SpeechSynthesisUtterance` with language matching assistant config. Free.
-- Summary: on endSession, send full transcript to GPT-4o-mini with the structured summary system prompt.
-
 ---
 
 ## Constants
@@ -423,7 +383,7 @@ export const ASSISTANT_STATUSES = ["draft", "published", "archived"] as const;
 4. **Transcripts save to DB per-event, not as one blob at end.** Stream them in during the session.
 5. **Every page handles empty, loading, and error states.**
 6. **Viewer role is read-only.** Server Actions must check role, not just hide buttons.
-7. **Mock provider is default.** App must work fully with zero API keys via `VOICE_PROVIDER=mock`.
+7. **`OPENAI_API_KEY` is required.** All sessions use `PipelineVoiceProvider` — there is no mock fallback.
 8. **All summaries are labeled as "DRAFT — For staff review only"** in the UI.
 9. **Session state machine is explicit.** No ad-hoc status string changes. Use a transition function.
 10. **Microphone permission denial shows a clear, actionable error** — not a silent failure.

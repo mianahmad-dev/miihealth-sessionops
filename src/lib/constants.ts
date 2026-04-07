@@ -40,3 +40,16 @@ export const SESSION_STATUSES = [
 ] as const;
 
 export const ASSISTANT_STATUSES = ["draft", "published", "archived"] as const;
+
+export const MEMORY_MODES = [
+  {
+    value: "full",
+    label: "Full history",
+    description: "Sends the complete conversation history to the model each turn. Best for accuracy on short sessions.",
+  },
+  {
+    value: "window",
+    label: "Sliding window",
+    description: "Keeps only the last 20 messages (≈10 turns). Reduces cost and latency on long sessions.",
+  },
+] as const;

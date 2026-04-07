@@ -1,9 +1,9 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
 import { ChevronLeft, AlertTriangle } from "lucide-react";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { sessions, assistants, transcriptEvents } from "@/lib/db/schema";
+import { sessions, assistants, transcriptEvents, users } from "@/lib/db/schema";
 import { requireAuth } from "@/lib/auth/helpers";
 import { Badge } from "@/components/ui/badge";
 import { SummaryCard } from "@/components/sessions/summary-card";
@@ -48,7 +48,7 @@ function formatMs(ms: number): string {
 
 export default async function SessionReviewPage({ params }: Props) {
   const { id } = await params;
-  await requireAuth();
+  const currentUser = await requireAuth();
 
   const session = await db
     .select()
@@ -58,11 +58,20 @@ export default async function SessionReviewPage({ params }: Props) {
 
   if (!session) notFound();
 
+  // Viewers can only view their own sessions
+  if (currentUser.role === "viewer" && session.operatorId !== currentUser.id) {
+    redirect("/sessions");
+  }
+
   const assistant = await db
     .select()
     .from(assistants)
     .where(eq(assistants.id, session.assistantId))
     .get();
+
+  const operator = currentUser.role === "admin"
+    ? await db.select().from(users).where(eq(users.id, session.operatorId)).get()
+    : null;
 
   const events = await db
     .select()
@@ -118,6 +127,12 @@ export default async function SessionReviewPage({ params }: Props) {
           <MetaField label="Started" value={formatDate(session.startedAt)} />
           <MetaField label="Ended" value={formatDate(session.endedAt)} />
         </div>
+        {operator && (
+          <div className="grid grid-cols-2 divide-x">
+            <MetaField label="Operator" value={operator.name} />
+            <MetaField label="Operator Email" value={operator.email} />
+          </div>
+        )}
       </div>
 
       {/* Transcript */}

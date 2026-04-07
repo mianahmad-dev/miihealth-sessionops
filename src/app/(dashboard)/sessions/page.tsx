@@ -1,13 +1,13 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { sessions, assistants } from "@/lib/db/schema";
+import { sessions, assistants, users } from "@/lib/db/schema";
 import { requireAuth } from "@/lib/auth/helpers";
 import { SessionTable, type SessionRow } from "@/components/sessions/session-table";
 
 export default async function SessionsPage() {
-  await requireAuth();
+  const currentUser = await requireAuth();
 
-  const rows = await db
+  const query = db
     .select({
       id: sessions.id,
       assistantId: sessions.assistantId,
@@ -17,10 +17,15 @@ export default async function SessionsPage() {
       startedAt: sessions.startedAt,
       durationSec: sessions.durationSec,
       turnCount: sessions.turnCount,
+      operatorName: users.name,
     })
     .from(sessions)
     .leftJoin(assistants, eq(sessions.assistantId, assistants.id))
-    .orderBy(sessions.createdAt);
+    .leftJoin(users, eq(sessions.operatorId, users.id));
+
+  const rows = currentUser.role === "viewer"
+    ? await query.where(eq(sessions.operatorId, currentUser.id)).orderBy(sessions.createdAt)
+    : await query.orderBy(sessions.createdAt);
 
   const sessionRows: SessionRow[] = rows.map((r) => ({
     id: r.id,
@@ -31,6 +36,7 @@ export default async function SessionsPage() {
     startedAt: r.startedAt,
     durationSec: r.durationSec,
     turnCount: r.turnCount,
+    operatorName: currentUser.role === "admin" ? (r.operatorName ?? "Unknown") : undefined,
   }));
 
   // Sort most recent first
