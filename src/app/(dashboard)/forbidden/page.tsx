@@ -14,9 +14,9 @@ export default function ForbiddenPage() {
           You don&apos;t have permission to view this page. Admin access is required.
         </p>
       </div>
-      <Button asChild variant="outline" size="sm">
-        <Link href="/assistants">Go to Assistants</Link>
-      </Button>
+      <Link href="/assistants">
+        <Button variant="outline" size="sm">Go to Assistants</Button>
+      </Link>
     </div>
   );
 }
