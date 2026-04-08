@@ -23,6 +23,14 @@ export default auth((req) => {
     return NextResponse.redirect(loginUrl);
   }
 
+  const adminRoutes = ["/audit", "/evaluation", "/assistants/new"];
+  if (adminRoutes.some((r) => nextUrl.pathname.startsWith(r))) {
+    const role = (req.auth?.user as { role?: string })?.role;
+    if (role !== "admin") {
+      return NextResponse.redirect(new URL("/forbidden", nextUrl));
+    }
+  }
+
   return NextResponse.next();
 });
 

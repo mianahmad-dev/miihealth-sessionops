@@ -22,8 +22,6 @@ export async function requireAuth(): Promise<SessionUser> {
 
 export async function requireAdmin(): Promise<SessionUser> {
   const user = await requireAuth();
-  if (user.role !== "admin") {
-    throw new Error("Forbidden: admin role required");
-  }
+  if (user.role !== "admin") redirect("/forbidden");
   return user;
 }
